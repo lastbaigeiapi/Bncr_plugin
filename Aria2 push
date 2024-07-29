@@ -1,0 +1,202 @@
+/**
+ * @author 啊屁
+ * @team 啊屁
+ * @name Aria2 push
+ * @version 1.0.3
+ * @description 管理Aria2下载任务
+ * @rule ^(magnet:\?xt=urn:btih:[a-zA-Z0-9]+)
+ * @rule ^(下载中|等待中|已完成|暂停任务|恢复任务|删除任务)$
+ * @admin true
+ * @public false
+ * @priority 50
+ */
+
+const axios = require('axios');
+
+// Aria2 JSON-RPC HTTP 配置
+const ARIA2_RPC_URL = 'http://ip:port/jsonrpc';
+const ARIA2_SECRET = 'prc token';
+
+// 辅助函数
+function byte2Readable(bytes, suffix = '') {
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    if (bytes === 0) return '0 B' + suffix;
+    const i = parseInt(Math.floor(Math.log(bytes) / Math.log(1024)), 10);
+    if (i === 0) return `${bytes} ${sizes[i]}${suffix}`;
+    return `${(bytes / (1024 ** i)).toFixed(1)} ${sizes[i]}${suffix}`;
+}
+
+function progress(total, completed) {
+    if (total === '0') return '0%';
+    return `${(completed / total * 100).toFixed(2)}%`;
+}
+
+function getFilename(task) {
+    return task.files[0]?.path.split('/').pop() || task.bittorrent?.info?.name || 'Unknown';
+}
+
+// Aria2 HTTP JSON-RPC 调用函数
+function aria2Call(method, params = []) {
+    return axios.post(ARIA2_RPC_URL, {
+        jsonrpc: '2.0',
+        method: `aria2.${method}`,
+        id: Date.now().toString(),
+        params: [`token:${ARIA2_SECRET}`, ...params]
+    }).then(response => {
+        if (response.data.error) {
+            throw new Error(response.data.error.message);
+        }
+        return response.data.result;
+    });
+}
+
+// 主函数
+module.exports = async (sender) => {
+    const msg = sender.getMsg();
+
+    // 处理磁力链接
+    if (msg.startsWith('magnet:?xt=urn:btih:')) {
+        try {
+            await aria2Call('addUri', [[msg]]);
+            await sender.reply('已添加下载任务');
+        } catch (error) {
+            await sender.reply('添加下载任务失败：' + error.message);
+        }
+    }
+
+    // 查看当前下载任务
+    else if (msg === '下载中') {
+        try {
+            const tasks = await aria2Call('tellActive');
+            await sendTaskList(sender, tasks, '当前下载中的任务');
+        } catch (error) {
+            await sender.reply('获取下载任务失败：' + error.message);
+        }
+    }
+
+    // 查看等待中的任务
+    else if (msg === '等待中') {
+        try {
+            const tasks = await aria2Call('tellWaiting', [0, 100]);
+            await sendTaskList(sender, tasks, '等待中的任务');
+        } catch (error) {
+            await sender.reply('获取等待任务失败：' + error.message);
+        }
+    }
+
+    // 查看已完成的任务
+    else if (msg === '已完成') {
+        try {
+            const tasks = await aria2Call('tellStopped', [0, 100]);
+            await sendTaskList(sender, tasks, '已完成或停止的任务');
+        } catch (error) {
+            await sender.reply('获取完成任务失败：' + error.message);
+        }
+    }
+
+    // 暂停任务
+    else if (msg === '暂停任务') {
+        try {
+            const tasks = await aria2Call('tellActive');
+            if (tasks.length === 0) {
+                await sender.reply('当前没有活动的下载任务');
+            } else {
+                const taskList = tasks.map(task => getFilename(task)).join('\n');
+                await sender.reply(`当前活动的任务：\n${taskList}\n\n请回复要暂停的任务名称`);
+                const response = await sender.waitInput(() => {}, 30);
+                if (response) {
+                    const taskToPause = tasks.find(task => getFilename(task) === response.getMsg());
+                    if (taskToPause) {
+                        await aria2Call('pause', [taskToPause.gid]);
+                        await sender.reply(`已暂停任务: ${getFilename(taskToPause)}`);
+                    } else {
+                        await sender.reply('未找到指定的任务');
+                    }
+                } else {
+                    await sender.reply('操作超时');
+                }
+            }
+        } catch (error) {
+            await sender.reply('获取任务失败：' + error.message);
+        }
+    }
+
+    // 恢复任务
+    else if (msg === '恢复任务') {
+        try {
+            const tasks = await aria2Call('tellWaiting', [0, 100]);
+            if (tasks.length === 0) {
+                await sender.reply('当前没有等待中的任务');
+            } else {
+                const taskList = tasks.map(task => getFilename(task)).join('\n');
+                await sender.reply(`当前等待中的任务：\n${taskList}\n\n请回复要恢复的任务名称`);
+                const response = await sender.waitInput(() => {}, 30);
+                if (response) {
+                    const taskToResume = tasks.find(task => getFilename(task) === response.getMsg());
+                    if (taskToResume) {
+                        await aria2Call('unpause', [taskToResume.gid]);
+                        await sender.reply(`已恢复任务: ${getFilename(taskToResume)}`);
+                    } else {
+                        await sender.reply('未找到指定的任务');
+                    }
+                } else {
+                    await sender.reply('操作超时');
+                }
+            }
+        } catch (error) {
+            await sender.reply('获取任务失败：' + error.message);
+        }
+    }
+
+    // 删除任务
+    else if (msg === '删除任务') {
+        try {
+            const activeTasks = await aria2Call('tellActive');
+            const waitingTasks = await aria2Call('tellWaiting', [0, 100]);
+            const allTasks = [...activeTasks, ...waitingTasks];
+            if (allTasks.length === 0) {
+                await sender.reply('当前没有可删除的任务');
+            } else {
+                const taskList = allTasks.map(task => getFilename(task)).join('\n');
+                await sender.reply(`当前所有任务：\n${taskList}\n\n请回复要删除的任务名称`);
+                const response = await sender.waitInput(() => {}, 30);
+                if (response) {
+                    const taskToDelete = allTasks.find(task => getFilename(task) === response.getMsg());
+                    if (taskToDelete) {
+                        await aria2Call('forceRemove', [taskToDelete.gid]);
+                        await sender.reply(`已删除任务: ${getFilename(taskToDelete)}`);
+                    } else {
+                        await sender.reply('未找到指定的任务');
+                    }
+                } else {
+                    await sender.reply('操作超时');
+                }
+            }
+        } catch (error) {
+            await sender.reply('获取任务失败：' + error.message);
+        }
+    }
+
+
+}
+
+async function sendTaskList(sender, tasks, title) {
+    if (tasks.length === 0) {
+        await sender.reply(`没有${title}`);
+    } else {
+        const taskList = tasks.map(task => {
+            const fileName = getFilename(task);
+            const totalLength = Number(task.totalLength);
+            const completedLength = Number(task.completedLength);
+            const downloadSpeed = Number(task.downloadSpeed);
+            return [
+                `文件名: ${fileName}`,
+                `大小: ${byte2Readable(totalLength)}`,
+                `进度: ${progress(totalLength, completedLength)}`,
+                `速度: ${byte2Readable(downloadSpeed, '/s')}`,
+            ].join('\n');
+        }).join('\n\n');
+        await sender.reply(`${title}：\n${taskList}`);
+    }
+    return 'next';
+};
