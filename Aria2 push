@@ -2,7 +2,7 @@
  * @author 啊屁
  * @team 啊屁
  * @name Aria2 push
- * @version 1.0.3
+ * @version 1.0.4
  * @description 管理Aria2下载任务
  * @rule ^(magnet:\?xt=urn:btih:[a-zA-Z0-9]+)
  * @rule ^(下载中|等待中|已完成|暂停任务|恢复任务|删除任务)$
@@ -96,101 +96,33 @@ module.exports = async (sender) => {
 
     // 暂停任务
     else if (msg === '暂停任务') {
-        try {
-            const tasks = await aria2Call('tellActive');
-            if (tasks.length === 0) {
-                await sender.reply('当前没有活动的下载任务');
-            } else {
-                const taskList = tasks.map(task => getFilename(task)).join('\n');
-                await sender.reply(`当前活动的任务：\n${taskList}\n\n请回复要暂停的任务名称`);
-                const response = await sender.waitInput(() => {}, 30);
-                if (response) {
-                    const taskToPause = tasks.find(task => getFilename(task) === response.getMsg());
-                    if (taskToPause) {
-                        await aria2Call('pause', [taskToPause.gid]);
-                        await sender.reply(`已暂停任务: ${getFilename(taskToPause)}`);
-                    } else {
-                        await sender.reply('未找到指定的任务');
-                    }
-                } else {
-                    await sender.reply('操作超时');
-                }
-            }
-        } catch (error) {
-            await sender.reply('获取任务失败：' + error.message);
-        }
+        await handleTaskOperation(sender, 'pause', '暂停任务');
     }
 
     // 恢复任务
     else if (msg === '恢复任务') {
-        try {
-            const tasks = await aria2Call('tellWaiting', [0, 100]);
-            if (tasks.length === 0) {
-                await sender.reply('当前没有等待中的任务');
-            } else {
-                const taskList = tasks.map(task => getFilename(task)).join('\n');
-                await sender.reply(`当前等待中的任务：\n${taskList}\n\n请回复要恢复的任务名称`);
-                const response = await sender.waitInput(() => {}, 30);
-                if (response) {
-                    const taskToResume = tasks.find(task => getFilename(task) === response.getMsg());
-                    if (taskToResume) {
-                        await aria2Call('unpause', [taskToResume.gid]);
-                        await sender.reply(`已恢复任务: ${getFilename(taskToResume)}`);
-                    } else {
-                        await sender.reply('未找到指定的任务');
-                    }
-                } else {
-                    await sender.reply('操作超时');
-                }
-            }
-        } catch (error) {
-            await sender.reply('获取任务失败：' + error.message);
-        }
+        await handleTaskOperation(sender, 'unpause', '恢复任务');
     }
 
     // 删除任务
     else if (msg === '删除任务') {
-        try {
-            const activeTasks = await aria2Call('tellActive');
-            const waitingTasks = await aria2Call('tellWaiting', [0, 100]);
-            const allTasks = [...activeTasks, ...waitingTasks];
-            if (allTasks.length === 0) {
-                await sender.reply('当前没有可删除的任务');
-            } else {
-                const taskList = allTasks.map(task => getFilename(task)).join('\n');
-                await sender.reply(`当前所有任务：\n${taskList}\n\n请回复要删除的任务名称`);
-                const response = await sender.waitInput(() => {}, 30);
-                if (response) {
-                    const taskToDelete = allTasks.find(task => getFilename(task) === response.getMsg());
-                    if (taskToDelete) {
-                        await aria2Call('forceRemove', [taskToDelete.gid]);
-                        await sender.reply(`已删除任务: ${getFilename(taskToDelete)}`);
-                    } else {
-                        await sender.reply('未找到指定的任务');
-                    }
-                } else {
-                    await sender.reply('操作超时');
-                }
-            }
-        } catch (error) {
-            await sender.reply('获取任务失败：' + error.message);
-        }
+        await handleTaskOperation(sender, 'remove', '删除任务');
     }
 
-
-}
+    return 'next';
+};
 
 async function sendTaskList(sender, tasks, title) {
     if (tasks.length === 0) {
         await sender.reply(`没有${title}`);
     } else {
-        const taskList = tasks.map(task => {
+        const taskList = tasks.map((task, index) => {
             const fileName = getFilename(task);
             const totalLength = Number(task.totalLength);
             const completedLength = Number(task.completedLength);
             const downloadSpeed = Number(task.downloadSpeed);
             return [
-                `文件名: ${fileName}`,
+                `任务${index + 1}: ${fileName.substring(0, 15)}...`,
                 `大小: ${byte2Readable(totalLength)}`,
                 `进度: ${progress(totalLength, completedLength)}`,
                 `速度: ${byte2Readable(downloadSpeed, '/s')}`,
@@ -198,5 +130,42 @@ async function sendTaskList(sender, tasks, title) {
         }).join('\n\n');
         await sender.reply(`${title}：\n${taskList}`);
     }
-    return 'next';
-};
+}
+
+async function handleTaskOperation(sender, operation, operationName) {
+    try {
+        const tasks = await aria2Call('tellActive');
+        if (tasks.length === 0) {
+            await sender.reply('当前没有可操作的任务');
+        } else {
+            const taskList = tasks.map((task, index) => `任务${index + 1}: ${getFilename(task).substring(0, 15)}...`).join('\n');
+            await sender.reply(`当前任务列表：\n${taskList}\n\n请回复要${operationName}的任务序号或输入'q'退出`);
+            const response = await sender.waitInput(() => {}, 30);
+            if (response) {
+                const userInput = response.getMsg().trim().toLowerCase();
+                if (userInput === 'q') {
+                    await sender.reply('操作已取消');
+                    return;
+                }
+                const taskIndex = parseInt(userInput) - 1;
+                if (taskIndex >= 0 && taskIndex < tasks.length) {
+                    const task = tasks[taskIndex];
+                    if (operation === 'pause') {
+                        await aria2Call('pause', [task.gid]);
+                    } else if (operation === 'unpause') {
+                        await aria2Call('unpause', [task.gid]);
+                    } else if (operation === 'remove') {
+                        await aria2Call('remove', [task.gid]);
+                    }
+                    await sender.reply(`已${operationName}: ${getFilename(task)}`);
+                } else {
+                    await sender.reply('无效的任务序号');
+                }
+            } else {
+                await sender.reply('操作超时');
+            }
+        }
+    } catch (error) {
+        await sender.reply(`获取任务失败：${error.message}`);
+    }
+}
