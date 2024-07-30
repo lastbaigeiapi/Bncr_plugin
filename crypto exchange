@@ -1,0 +1,80 @@
+/**
+ * @author 啊屁
+ * @team 啊屁
+ * @name cryptoExchange
+ * @version 1.0.5
+ * @description 虚拟币价格转换插件
+ * @rule ^bc (\w+) (\w+) (\d+(\.\d+)?)$
+ * @admin true
+ * @public false
+ * @priority 1
+ * @disable false
+ */
+
+const axios = require('axios');
+
+async function getPrice(symbol) {
+    try {
+        const apiUrl = `https://api.huobi.pro/market/detail/merged?symbol=${symbol}`;
+        const { data } = await axios.get(apiUrl);
+        
+        if (data.status !== 'ok' || !data.tick || !data.tick.bid) {
+            throw new Error('无法获取价格数据');
+        }
+
+        // 获取买一价（当前最高买价）
+        return parseFloat(data.tick.bid[0]);
+    } catch (error) {
+        console.error(`获取 ${symbol} 实时价格时出错: ${error.message}`);
+        throw new Error(`获取 ${symbol} 实时价格时出错。请稍后再试。`);
+    }
+}
+
+module.exports = async (sender) => {
+    try {
+        // 提取命令和参数
+        const msg = sender.getMsg(); // 获取消息内容
+        const [command, fromCurrency, toCurrency, amount] = msg.split(' '); // 解析参数
+
+        // 检查命令和参数
+        if (command !== 'exchange' || !fromCurrency || !toCurrency || !amount) {
+            await sender.reply('请提供有效的命令格式，如：exchange btc usdt 1');
+            return;
+        }
+
+        let fromPrice, toPrice;
+
+        // 如果币种是法币（USDT），直接设置价格为1
+        if (fromCurrency.toLowerCase() === 'usdt') {
+            fromPrice = 1;
+        } else {
+            // 获取从币种的价格
+            fromPrice = await getPrice(`${fromCurrency.toLowerCase()}usdt`);
+        }
+
+        if (toCurrency.toLowerCase() === 'usdt') {
+            toPrice = 1;
+        } else {
+            // 获取到币种的价格
+            toPrice = await getPrice(`${toCurrency.toLowerCase()}usdt`);
+        }
+
+        // 计算转换后的金额
+        const convertedAmount = ((amount * fromPrice) / toPrice).toFixed(4);
+
+        const output = `
+**虚拟币实时转换结果**
+- 币种1: ${fromCurrency.toUpperCase()}
+- 币种2: ${toCurrency.toUpperCase()}
+- 数量: ${amount}
+- 当前 ${fromCurrency.toUpperCase()} 价格: ${fromPrice} USDT
+- 当前 ${toCurrency.toUpperCase()} 价格: ${toPrice} USDT
+- 转换后金额: ${convertedAmount} ${toCurrency.toUpperCase()}
+        `;
+        await sender.reply(output);
+
+    } catch (error) {
+        console.error(`获取实时价格数据时出错: ${error.message}`);
+        await sender.reply(`获取实时价格数据时出现错误：${error.message}。请稍后再试。`);
+    }
+};
