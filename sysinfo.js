@@ -2,7 +2,7 @@
  * @author 啊屁
  * @team 啊屁
  * @name sysinfo
- * @version 1.0.3
+ * @version 1.0.4
  * @description 获取系统信息
  * @rule ^(sysinfo)$
  * @admin true
@@ -25,6 +25,7 @@ module.exports = async (sender) => {
         const cpuInfo = os.cpus();
         const osType = os.type();
         const osRelease = os.release();
+        const userInfo = os.userInfo();
         const loadAvg = os.loadavg();
 
         // 获取GPU信息
@@ -47,10 +48,12 @@ module.exports = async (sender) => {
 - 操作系统: ${osType} ${osRelease}
 - 架构: ${arch}
 - 运行时间: ${uptimeFormatted}
-- 内存使用: 总共 ${totalMemMB} MB / 已使用 ${usedMemMB} MB / 未使用 ${freeMemMB} MB
+- 总内存: ${totalMemMB} MB
+- 内存使用: 已使用 ${usedMemMB} MB / 未使用 ${freeMemMB} MB
 - CPU型号: ${cpuInfo[0].model}
-- CPU速度: ${cpuInfo[0].speed} MHz
-- CPU核心数: ${cpuInfo.length}
+  - 速度: ${cpuInfo[0].speed} MHz
+  - 核心数: ${cpuInfo.length}
+- 当前用户: ${userInfo.username}
 - 系统负载(1/5/15分钟): ${loadAvg.map(avg => avg.toFixed(2)).join('/')}
 - GPU: ${gpus || '无GPU信息'}
         `;
