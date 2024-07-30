@@ -4,7 +4,7 @@
  * @name cryptoExchange
  * @version 1.0.5
  * @description 虚拟币价格转换插件
- * @rule ^bc (\w+) (\w+) (\d+(\.\d+)?)$
+ * @rule ^exchange (\w+) (\w+) (\d+(\.\d+)?)$
  * @admin true
  * @public false
  * @priority 1
