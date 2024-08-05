@@ -2,16 +2,22 @@
  * @author 啊屁
  * @team 啊屁
  * @name Blockchair Stats
- * @version 1.0.1
+ * @version 1.0.2
  * @description 获取区块链统计数据和查询区块链地址信息
  * @rule ^(bitcoin|bitcoin-cash|litecoin|bitcoin-sv|dogecoin|dash|groestlcoin|zcash|ecash|bitcoin/testnet) stats$
  * @rule ^查询地址 (\w+):(\w+)$
  * @admin false
- * @public true
+ * @public false
  * @priority 50
  */
 
 const axios = require('axios');
+
+const jsonSchema = BncrCreateSchema.object({
+  api_key: BncrCreateSchema.string().setTitle('设置api key').setDescription('配置blockchair api key'),
+});
+
+const ConfigDB = new BncrPluginConfig(jsonSchema);
 
 // 区块链API端点
 const endpoints = {
@@ -28,20 +34,23 @@ const endpoints = {
 };
 
 // 辅助函数
-async function fetchBlockchainStats(url) {
+async function fetchBlockchainStats(url, apiKey) {
     try {
-        const response = await axios.get(url);
-        const data = response.data.data;
-        return data;
+        const fullUrl = `${url}?key=${apiKey}`;
+        const response = await axios.get(fullUrl);
+        return response.data.data;
     } catch (error) {
         console.error(`获取数据时出错: ${error.message}`);
+        if (error.response && error.response.status === 402) {
+            throw new Error('无效的 API 令牌,请重新设置');
+        }
         throw new Error('无法获取区块链统计数据');
     }
 }
 
-async function queryAddress(blockchain, address) {
+async function queryAddress(blockchain, address, apiKey) {
     try {
-        const apiUrl = `https://api.blockchair.com/${blockchain}/dashboards/address/${address}`;
+        const apiUrl = `https://api.blockchair.com/${blockchain}/dashboards/address/${address}?key=${apiKey}`;
         const response = await axios.get(apiUrl);
         
         if (response.data.context.code !== 200) {
@@ -51,7 +60,7 @@ async function queryAddress(blockchain, address) {
         const data = response.data.data[address];
         const addressInfo = data.address;
         
-        const output = `
+        return `
 **地址信息 (${blockchain.toUpperCase()})**
 - 地址: ${address}
 - 类型: ${addressInfo.type}
@@ -67,9 +76,11 @@ async function queryAddress(blockchain, address) {
 - 最后花费时间: ${addressInfo.last_seen_spending}
 - 交易总数: ${addressInfo.transaction_count}
         `;
-        return output;
     } catch (error) {
         console.error(`查询地址信息出错: ${error.message}`);
+        if (error.response && error.response.status === 402) {
+            throw new Error('无效的 API 令牌,请重新设置');
+        }
         throw new Error(`查询地址信息时出错。请稍后再试。`);
     }
 }
@@ -99,6 +110,14 @@ function formatStats(data, currency) {
 // 主函数
 module.exports = async (sender) => {
     const msg = sender.getMsg().trim().toLowerCase();
+    
+    // 使用全局配置
+    const config = await ConfigDB.get();
+    const apiKey = config.api_key;
+
+    if (!apiKey) {
+        return sender.reply('请先设置 Blockchair API key。');
+    }
 
     // 区块链统计数据查询
     if (/^(bitcoin|bitcoin-cash|litecoin|bitcoin-sv|dogecoin|dash|groestlcoin|zcash|ecash|bitcoin\/testnet) stats$/.test(msg)) {
@@ -106,11 +125,15 @@ module.exports = async (sender) => {
         
         if (endpoints[currency]) {
             try {
-                const stats = await fetchBlockchainStats(endpoints[currency]);
+                const stats = await fetchBlockchainStats(endpoints[currency], apiKey);
                 const output = formatStats(stats, currency);
                 await sender.reply(output);
             } catch (error) {
-                await sender.reply(`获取${currency.toUpperCase()}统计数据时出错: ${error.message}`);
+                if (error.message === '无效的 API 令牌,请重新设置') {
+                    await sender.reply(error.message);
+                } else {
+                    await sender.reply(`获取${currency.toUpperCase()}统计数据时出错: ${error.message}`);
+                }
             }
         } else {
             await sender.reply('不支持的货币类型，请选择以下之一：bitcoin, bitcoin-cash, litecoin, bitcoin-sv, dogecoin, dash, groestlcoin, zcash, ecash, bitcoin/testnet');
@@ -124,10 +147,14 @@ module.exports = async (sender) => {
 
         if (Object.keys(endpoints).includes(blockchain)) {
             try {
-                const result = await queryAddress(blockchain, address);
+                const result = await queryAddress(blockchain, address, apiKey);
                 await sender.reply(result);
             } catch (error) {
-                await sender.reply(`查询${blockchain.toUpperCase()}地址信息时出错: ${error.message}`);
+                if (error.message === '无效的 API 令牌,请重新设置') {
+                    await sender.reply(error.message);
+                } else {
+                    await sender.reply(`查询${blockchain.toUpperCase()}地址信息时出错: ${error.message}`);
+                }
             }
         } else {
             await sender.reply('不支持的区块链，请选择以下之一：bitcoin, bitcoin-cash, litecoin, bitcoin-sv, dogecoin, dash, groestlcoin, zcash, ecash, bitcoin/testnet');
