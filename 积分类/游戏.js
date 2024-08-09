@@ -3,7 +3,7 @@
  * @team 啊屁
  * @author 啊屁
  * @description 积分纸牌游戏系统插件，包括抽卡、三公、炸金花和21点
- * @version 1.6.0
+ * @version 1.7.0
  * @rule ^抽卡|三公|炸金花|21点$
  * @priority 1000
  * @disable false
@@ -35,13 +35,13 @@ const CARD_POINTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10];  // 1到10，J,
 const BLACKJACK_TARGET = 21;
 
 // 比大小游戏的规则
-const MAX_BET = 100;  // 最大下注积分
 const DRAW_LOSS = 10; // 平局时扣除积分
 
 class CardGameSystem {
     constructor(sender) {
         this.sender = sender; // 保存 sender 对象
         this.currentBet = 0; // 当前下注金额
+        this.timeoutOccurred = false; // 超时标志
     }
 
     async drawCard(userId, bet) {
@@ -56,26 +56,20 @@ class CardGameSystem {
                 return '你今天已经抽过卡了，请明天再来！';
             }
 
-            if (userData.points < bet) return '积分不足，无法抽卡';
-
-            // 扣除积分
-            const updatedUserData = await commonUtils.updateUserDataByKey(userKey, {
-                points: userData.points - bet
-            });
+            if (bet <= 0) return '下注金额必须大于0';
 
             // 抽取卡牌
             const card = this.getRandomCard();
             const winnings = card.value;
 
             // 更新积分和抽卡记录
-            await commonUtils.updateUserDataByKey(userKey, {
-                points: updatedUserData.points + winnings,
-                lastDraw: new Date().toISOString().split('T')[0]
-            });
+            userData.points += winnings;
+            userData.lastDraw = new Date().toISOString().split('T')[0];
+            await commonUtils.updateUserDataByKey(userKey, userData);
 
             return `🎉 你抽到了一张 ${card.name}！\n` +
                 `🔮 卡牌价值: ${winnings} 积分\n` +
-                `💰 当前积分: ${updatedUserData.points + winnings}`;
+                `💰 当前积分: ${userData.points}`;
         } catch (error) {
             commonUtils.handleError(error);
             return '😢 抽卡时发生了错误，请稍后再试。';
@@ -88,7 +82,7 @@ class CardGameSystem {
             if (!userKey) return '请先使用有效的key登录';
 
             const userData = await commonUtils.getUserDataByKey(userKey);
-            if (userData.points < bet) return '积分不足，无法参与三公游戏';
+            if (bet <= 0) return '下注金额必须大于0';
 
             // 记录下注金额
             this.currentBet = bet;
@@ -105,30 +99,33 @@ class CardGameSystem {
             // 询问是否做庄
             const isDealer = await this.askForDealer();
 
+            if (this.timeoutOccurred) {
+                return '⏳ 游戏超时，操作已取消。';
+            }
+
             if (playerValue === dealerValue) {
                 if (isDealer) {
-                    await commonUtils.updateUserDataByKey(userKey, {
-                        points: userData.points + this.currentBet
-                    });
+                    userData.points += this.currentBet;
+                    await commonUtils.updateUserDataByKey(userKey, userData);
                     resultMessage += `🤝 平局！作为庄家，你赢得了 ${this.currentBet} 积分\n` +
-                        `💰 当前积分: ${userData.points + this.currentBet}\n` +
+                        `💰 当前积分: ${userData.points}\n` +
                         `🏆 平局，庄家赢得额外积分。`;
                 } else {
-                    await commonUtils.updateUserDataByKey(userKey, {
-                        points: userData.points - DRAW_LOSS
-                    });
+                    userData.points -= DRAW_LOSS;
+                    await commonUtils.updateUserDataByKey(userKey, userData);
                     resultMessage += `🤝 平局！你没有选择做庄，扣除 ${DRAW_LOSS} 积分\n` +
-                        `💰 当前积分: ${userData.points - DRAW_LOSS}\n` +
+                        `💰 当前积分: ${userData.points}\n` +
                         `⚖️ 平局，积分因未坐庄而减少。`;
                 }
             } else if (playerValue > dealerValue) {
-                await commonUtils.updateUserDataByKey(userKey, {
-                    points: userData.points + this.currentBet * 2
-                });
+                userData.points += this.currentBet;
+                await commonUtils.updateUserDataByKey(userKey, userData);
                 resultMessage += `🎉 胜利！你赢得了 ${this.currentBet} 积分\n` +
-                    `💰 当前积分: ${userData.points + this.currentBet * 2}\n` +
+                    `💰 当前积分: ${userData.points}\n` +
                     `🥇 你赢得了比赛，因为你的牌值更高。`;
             } else {
+                userData.points -= this.currentBet;
+                await commonUtils.updateUserDataByKey(userKey, userData);
                 resultMessage += `😢 失败！你失去了 ${this.currentBet} 积分\n` +
                     `💰 当前积分: ${userData.points}\n` +
                     `💔 对手的牌值更高，你输了。`;
@@ -147,7 +144,7 @@ class CardGameSystem {
             if (!userKey) return '请先使用有效的key登录';
 
             const userData = await commonUtils.getUserDataByKey(userKey);
-            if (userData.points < bet) return '积分不足，无法参与炸金花';
+            if (bet <= 0) return '下注金额必须大于0';
 
             // 记录下注金额
             this.currentBet = bet;
@@ -164,31 +161,34 @@ class CardGameSystem {
             // 询问是否做庄
             const isDealer = await this.askForDealer();
 
+            if (this.timeoutOccurred) {
+                return '⏳ 游戏超时，操作已取消。';
+            }
+
             if (playerValue > dealerValue) {
-                await commonUtils.updateUserDataByKey(userKey, {
-                    points: userData.points + this.currentBet * 2
-                });
+                userData.points += this.currentBet;
+                await commonUtils.updateUserDataByKey(userKey, userData);
                 resultMessage += `🎉 胜利！你赢得了 ${this.currentBet} 积分\n` +
-                    `💰 当前积分: ${userData.points + this.currentBet * 2}\n` +
+                    `💰 当前积分: ${userData.points}\n` +
                     `🥇 你赢了，因为你的牌更高。`;
             } else if (playerValue < dealerValue) {
+                userData.points -= this.currentBet;
+                await commonUtils.updateUserDataByKey(userKey, userData);
                 resultMessage += `😢 失败！你失去了 ${this.currentBet} 积分\n` +
                     `💰 当前积分: ${userData.points}\n` +
                     `💔 对手的牌值更高，你输了。`;
             } else {
                 if (isDealer) {
-                    await commonUtils.updateUserDataByKey(userKey, {
-                        points: userData.points + this.currentBet
-                    });
+                    userData.points += this.currentBet;
+                    await commonUtils.updateUserDataByKey(userKey, userData);
                     resultMessage += `🤝 平局！作为庄家，你赢得了 ${this.currentBet} 积分\n` +
-                        `💰 当前积分: ${userData.points + this.currentBet}\n` +
+                        `💰 当前积分: ${userData.points}\n` +
                         `⚖️ 平局，庄家获得额外积分。`;
                 } else {
-                    await commonUtils.updateUserDataByKey(userKey, {
-                        points: userData.points - DRAW_LOSS
-                    });
+                    userData.points -= DRAW_LOSS;
+                    await commonUtils.updateUserDataByKey(userKey, userData);
                     resultMessage += `🤝 平局！你没有选择做庄，扣除 ${DRAW_LOSS} 积分\n` +
-                        `💰 当前积分: ${userData.points - DRAW_LOSS}\n` +
+                        `💰 当前积分: ${userData.points}\n` +
                         `⚖️ 平局，积分因未坐庄而减少。`;
                 }
             }
@@ -206,15 +206,10 @@ class CardGameSystem {
             if (!userKey) return '请先使用有效的key登录';
 
             const userData = await commonUtils.getUserDataByKey(userKey);
-            if (userData.points < bet) return '积分不足，无法参与21点游戏';
+            if (bet <= 0) return '下注金额必须大于0';
 
             // 记录下注金额
             this.currentBet = bet;
-
-            // 扣除积分（如果需要）
-            const updatedUserData = await commonUtils.updateUserDataByKey(userKey, {
-                points: userData.points - bet
-            });
 
             // 游戏逻辑
             const playerHand = [this.drawCardValue(), this.drawCardValue()];
@@ -228,35 +223,40 @@ class CardGameSystem {
             // 询问是否做庄
             const isDealer = await this.askForDealer();
 
+            if (this.timeoutOccurred) {
+                return '⏳ 游戏超时，操作已取消。';
+            }
+
             if (playerScore > BLACKJACK_TARGET) {
+                userData.points -= this.currentBet;
+                await commonUtils.updateUserDataByKey(userKey, userData);
                 resultMessage += `😢 你爆点了，失败！你失去了 ${this.currentBet} 积分\n` +
-                    `💰 当前积分: ${updatedUserData.points}\n` +
+                    `💰 当前积分: ${userData.points}\n` +
                     `💔 你的得分超过了 ${BLACKJACK_TARGET}，因此爆点失败。`;
             } else if (dealerScore > BLACKJACK_TARGET || playerScore > dealerScore) {
-                await commonUtils.updateUserDataByKey(userKey, {
-                    points: updatedUserData.points + this.currentBet * 2
-                });
+                userData.points += this.currentBet;
+                await commonUtils.updateUserDataByKey(userKey, userData);
                 resultMessage += `🎉 胜利！你赢得了 ${this.currentBet} 积分\n` +
-                    `💰 当前积分: ${updatedUserData.points + this.currentBet * 2}\n` +
-                    `🥇 你的得分比对手高，或者对手爆点，你获胜了。`;
+                    `💰 当前积分: ${userData.points}\n` +
+                    `🥇 你获胜了，因为你的得分更高，或对手爆点。`;
             } else if (playerScore < dealerScore) {
+                userData.points -= this.currentBet;
+                await commonUtils.updateUserDataByKey(userKey, userData);
                 resultMessage += `😢 失败！你失去了 ${this.currentBet} 积分\n` +
-                    `💰 当前积分: ${updatedUserData.points}\n` +
-                    `💔 对手的得分高于你，你输了。`;
+                    `💰 当前积分: ${userData.points}\n` +
+                    `💔 对手的得分更高，你输了。`;
             } else {
                 if (isDealer) {
-                    await commonUtils.updateUserDataByKey(userKey, {
-                        points: updatedUserData.points + this.currentBet
-                    });
+                    userData.points += this.currentBet;
+                    await commonUtils.updateUserDataByKey(userKey, userData);
                     resultMessage += `🤝 平局！作为庄家，你赢得了 ${this.currentBet} 积分\n` +
-                        `💰 当前积分: ${updatedUserData.points + this.currentBet}\n` +
+                        `💰 当前积分: ${userData.points}\n` +
                         `⚖️ 平局，庄家获得额外积分。`;
                 } else {
-                    await commonUtils.updateUserDataByKey(userKey, {
-                        points: updatedUserData.points - DRAW_LOSS
-                    });
+                    userData.points -= DRAW_LOSS;
+                    await commonUtils.updateUserDataByKey(userKey, userData);
                     resultMessage += `🤝 平局！你没有选择做庄，扣除 ${DRAW_LOSS} 积分\n` +
-                        `💰 当前积分: ${updatedUserData.points - DRAW_LOSS}\n` +
+                        `💰 当前积分: ${userData.points}\n` +
                         `⚖️ 平局，积分因未坐庄而减少。`;
                 }
             }
@@ -325,8 +325,8 @@ class CardGameSystem {
         }, 30);
 
         if (newMsg === null) {
-            this.sender.reply('超时未回复，默认处理为平局。');
-            return false;
+            this.timeoutOccurred = true; // 设置超时标志
+            return null;
         }
 
         const response = newMsg.getMsg().trim().toLowerCase();
