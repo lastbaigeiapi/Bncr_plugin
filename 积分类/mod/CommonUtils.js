@@ -59,11 +59,24 @@ async function handleError(error) {
     console.error(error);
 }
 
+// 移除Key
+async function removeKey(key) {
+    await keyDB.del(key);
+}
+
+// 移除用户数据
+async function removeUserDataByKey(key) {
+    await userDB.del(key);
+}
+
+// 导出函数
 module.exports = {
     getUserIdsByKey,
     addUserIdToKey,
     getUserDataByKey,
     updateUserDataByKey,
     isLoggedIn,
+    removeKey,
+    removeUserDataByKey,  // 新增此行
     handleError
 };
