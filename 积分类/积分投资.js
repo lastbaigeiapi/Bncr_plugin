@@ -3,7 +3,7 @@
  * @team 啊屁
  * @author 啊屁
  * @description 虚拟币投资系统插件，允许用户使用积分进行虚拟币投资、查看收益和卖出虚拟币。
- * @version 1.0.1
+ * @version 1.0.2
  * @rule ^投资 (\w+) (\d+)$
  * @rule ^我的投资$
  * @rule ^可购买币种$
@@ -11,7 +11,7 @@
  * @priority 1000
  * @disable false
  * @public false
- * @admin true
+ * @admin false
  */
 
 const axios = require('axios');
@@ -101,7 +101,7 @@ class CryptoInvestment {
 
 
     // 查看投资和收益情况
-    async viewInvestments(sender) {
+async viewInvestments(sender) {
     const userId = sender.getUserId();
     const key = await commonUtils.isLoggedIn(userId);
 
@@ -126,6 +126,10 @@ class CryptoInvestment {
             const profitOrLoss = currentUsdtValue - investment.totalInvested;
             const profitOrLossPercentage = (profitOrLoss / investment.totalInvested) * 100;
 
+            // 计算积分收益
+            const pointsProfitOrLoss = profitOrLoss / 10; // USDT 转换为积分
+            const pointsReturnRate = (pointsProfitOrLoss / investment.points) * 100;
+
             replyMessage += `
 - 币种: ${investment.currency.toUpperCase()}
 - 投资积分: ${investment.points.toFixed(2)}
@@ -134,6 +138,8 @@ class CryptoInvestment {
 - 当前价格: ${currentPrice.toFixed(6)} USDT
 - 当前价值: ${currentUsdtValue.toFixed(6)} USDT
 - 收益: ${profitOrLoss.toFixed(6)} USDT (${profitOrLossPercentage.toFixed(2)}%)
+- 积分收益: ${pointsProfitOrLoss.toFixed(2)} 积分
+- 积分收益率: ${pointsReturnRate.toFixed(2)}%
 - 投资时间: ${investment.date}
             `;
         } catch (error) {
@@ -151,6 +157,8 @@ class CryptoInvestment {
 
     await sender.reply(replyMessage);
 }
+
+
 
     // 查看可购买币种及其数量
     async viewPurchasableCurrencies(sender) {
@@ -230,6 +238,10 @@ async sell(sender, currency, amount) {
         const pointsGained = sellUsdtValue / 10;
         userData.points += pointsGained;
 
+        // 计算积分收益
+        const pointsProfitOrLoss = profitOrLoss / 10; // USDT 转换为积分
+        const pointsReturnRate = (pointsProfitOrLoss / (cost / 10)) * 100;
+
         if (amount === investment.amountInvested) {
             userData.investments.splice(investmentIndex, 1);
         } else {
@@ -239,11 +251,21 @@ async sell(sender, currency, amount) {
 
         await commonUtils.updateUserDataByKey(key, userData);
 
-        await sender.reply(`✅ 卖出成功！\n卖出数量: ${amount} ${currency.toUpperCase()}\n卖出价格: ${currentPrice.toFixed(6)} USDT\n卖出价值: ${sellUsdtValue.toFixed(6)} USDT\n成本: ${cost.toFixed(6)} USDT\n收益: ${profitOrLoss.toFixed(6)} USDT\n时间: ${this.getCurrentDateTime()}`);
+        await sender.reply(`✅ 卖出成功！
+卖出数量: ${amount} ${currency.toUpperCase()}
+卖出价格: ${currentPrice.toFixed(6)} USDT
+卖出价值: ${sellUsdtValue.toFixed(6)} USDT
+成本: ${cost.toFixed(6)} USDT
+收益: ${profitOrLoss.toFixed(6)} USDT
+积分收益: ${pointsProfitOrLoss.toFixed(2)} 积分
+积分收益率: ${pointsReturnRate.toFixed(2)}%
+时间: ${this.getCurrentDateTime()}`);
     } catch (error) {
         await sender.reply(`卖出时发生错误: ${error.message}\n时间: ${this.getCurrentDateTime()}`);
     }
 }
+
+
 
 }
 
